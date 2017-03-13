@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <stdlib.h>
 #include <string>
+#include <sstream>
 
 #define PUT 1
 #define DEL 2
@@ -204,7 +205,10 @@ void put (int sock, string path, int type, string localPath)
         //  cout << fsize << endl;
         if (fsize == -1) errMsg(42, "ERROR zadna velikost souboru");
 
-        rest += to_string(fsize) + "\n\r";
+        stringstream ss;
+        ss << fsize;
+        string str = ss.str();
+        rest += str + "\n\r";
 
         rewind(file);
         string a = "file -b --mime-type " + localPath;
