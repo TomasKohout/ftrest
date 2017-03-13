@@ -27,7 +27,10 @@
 // port         (?<=:)[0-9]*
 // path         (?<=[0-9])\/.*
 using namespace std;
-vector<string> commands = { "PUT", "DEL", "GET", "LST", "MKD", "RMD"};
+
+string arr[] = { "PUT", "DEL", "GET", "LST", "MKD", "RMD"};
+vector<string> commands (arr, arr + 6) ;
+
 struct arg {
     string portNum;
     string type;
