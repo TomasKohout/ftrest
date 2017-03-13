@@ -14,6 +14,7 @@
 #include <netinet/in.h>
 #include <time.h>
 #include <cstdio>
+#include <stdlib.h>
 
 #define PUT 1
 #define DEL 2
@@ -286,7 +287,7 @@ int main(int argc , char *argv[])
     sockaddr_in serv_addr;
     hostent *server = NULL;
 
-    portno = stoi(str->portNum);
+    portno = atoi(str->portNum.c_str());
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
     if (sockfd < 0)
