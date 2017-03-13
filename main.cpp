@@ -15,6 +15,7 @@
 #include <time.h>
 #include <cstdio>
 #include <stdlib.h>
+#include <string>
 
 #define PUT 1
 #define DEL 2
