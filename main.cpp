@@ -45,6 +45,28 @@ struct arg {
 //regex localhost ("(?<=\\/)([a-zA-Z0-9\\.]*)(?=:)");
 //regex port  ("(?<=:)[0-9]*");
 //regex path ("(?<=[0-9])\\/.*");
+//0 == folder , 1 == file, ERR == 2
+int fileOrFolder(string path)
+{
+    struct stat s;
+
+    if( stat(path.c_str(),&s) == 0 )
+    {
+        if( s.st_mode & S_IFDIR )
+        {
+            return 0;
+            //typeOfMsg = "?type=folder HTTP/1.1";
+            // cout << localPath + "dir" << endl;
+        }
+        else if( s.st_mode & S_IFREG )
+        {
+            return 1;
+        } else
+            return 2;
+
+    } else
+        return 2;
+}
 void errMsg(int err,const char *msg)
 {
     perror(msg);
@@ -140,6 +162,68 @@ arg* getParams(int argc, char *argv[])
 
     return str;
 }
+string createHeader(int type, string path)
+{
+    char buf[1024];
+    string rest;
+    time_t now = time(0);
+    tm tm = *gmtime(&now);
+    strftime(buf, sizeof buf, "%a, %d %b %Y %H:%M:%S %Z", &tm);
+    switch (type)
+    {
+        case DEL:
+            rest = "DELETE ";
+            rest.append(path);
+            rest += "?type=file HTTP/1.1";
+            rest += "\r\nDate: ";
+            rest.append(buf);
+            rest += "\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n";
+
+            break;
+
+        case RMD:
+            rest = "DELETE ";
+            rest.append(path);
+            rest += "?type=folder HTTP/1.1";
+            rest += "\r\nDate: ";
+            rest.append(buf);
+            rest += "\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n";
+
+            break;
+        case GET:
+            rest = "GET ";
+            rest.append(path);
+            rest += "?type=file HTTP/1.1";
+            rest += "\r\nDate: ";
+            rest.append(buf);
+            rest += "\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n";
+            break;
+        case LST:
+            rest = "GET ";
+            rest.append(path);
+            rest += "?type=folder HTTP/1.1";
+
+            rest += "\r\nDate: ";
+            rest.append(buf);
+            rest += "\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n";
+
+
+            break;
+    }
+
+    return rest;
+}
+
+string readSock(int socket){
+    char buf[1024];
+    bzero(buf, 1024);
+    int n;
+    string rest;
+    n = (int) read(socket, buf, 1024);
+    if (n < 0) errMsg(42, "ERROR cteni ze socketu");
+    rest = buf;
+    return rest;
+}
 
 void put (int sock, string path, int type, string localPath)
 {
@@ -153,7 +237,7 @@ void put (int sock, string path, int type, string localPath)
     string typeOfMsg;
     time_t now;
     struct tm tm;
-
+    long save;
     if( stat(localPath.c_str(),&s) == 0 )
     {
         if( s.st_mode & S_IFDIR )
@@ -195,6 +279,8 @@ void put (int sock, string path, int type, string localPath)
     rest += "\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nContent-Type: application/octet-stream\r\nContent-Length: ";
 
     if (type == PUT) {
+        if (fileOrFolder(localPath) != 1)
+            errMsg(42, "ERROR nelze otevrit nic jineho nez soubor");
         file = fopen(localPath.c_str(), "rb");
 
         if (!file) errMsg(42, "ERROR pri otevirani souboru");
@@ -209,7 +295,7 @@ void put (int sock, string path, int type, string localPath)
         ss << fsize;
         string str = ss.str();
         rest += str + "\n\r";
-
+        save = fsize;
         rewind(file);
         string a = "file -b --mime-type " + localPath;
         if ((mime = popen(a.c_str(), "r")) == NULL)
@@ -231,11 +317,10 @@ void put (int sock, string path, int type, string localPath)
         n = (int) write(sock, rest.data(), 1024);
         if (n < 0) errMsg(42, "ERROR cteni ze socketu");
 
-        bzero(buf, 1024);
-        n = (int) read(sock, buf, 1024);
-        if (n < 0) errMsg(42, "ERROR cteni ze socketu");
-        if (strcmp(buf, "HTTP/1.1 200 OK") != 0) errMsg(42, "ERROR neco se pokazilo u respondu.");
+        rest = readSock(sock);
+        if (rest != "200 OK\n") errMsg(42, "ERROR neco se pokazilo u respondu.");
 
+        //todo read http head
         while (fsize > 0) {
             int sent = (int) send(sock, content, fsize, 0);
             if (sent <= 0) {
@@ -245,11 +330,8 @@ void put (int sock, string path, int type, string localPath)
             content += sent;
             fsize -= sent;
         }
-        bzero(buf, 1024);
-        n = (int) read(sock, buf, 1024);
-        if (n < 0) errMsg(42, "ERROR cteni ze socketu");
-        if (strcmp(buf, "HTTP/1.1 200 OK") != 0) errMsg(42, "ERROR neco se pokazilo u respondu.");
 
+        free(content-save);
         cout << buf << endl;
     }
     else if (type == MKD)
@@ -259,24 +341,141 @@ void put (int sock, string path, int type, string localPath)
         n = (int) write(sock, rest.data(), 1024);
         if (n < 0) errMsg(42, "ERROR cteni ze socketu");
 
-        n = (int) read(sock, buf, 1024);
-        if (n < 0) errMsg(42, "ERROR cteni ze socketu");
-        if (strcmp(buf, "HTTP/1.1 200 OK") != 0) errMsg(42, "ERROR neco se pokazilo u respondu.");
-        cout << buf << endl;
+        rest = readSock(sock);
+        if (rest != "200 OK\n")
+        {
+            if(strcmp(buf, "Already exists.") == 0)
+            {
+                cerr<<buf<<endl;
+            }
+            else
+                errMsg(42, "ERROR neco se pokazilo u respondu.");
+        }
+        //cout << buf << endl;
 
     }
-    //free(content);
-    close(sock);
 
 }
 
+
 void get(int sock, string path, int type, string localPath)
 {
+    char buf[1024];
+    int size = 0;
+    int n;
+    FILE *file;
+    string rest;
+   // cout << path << endl;
+    if (type == GET)
+    {
+        size_t f = path.find_last_of("/");
+        localPath += path.substr(f);
+
+        rest = createHeader(type, path);
+
+
+        n = (int) write(sock, rest.data(), 1024);
+        if (n < 0) errMsg(42, "ERROR cteni ze socketu");
+
+        rest = readSock(sock);
+        if (rest == "404 Not Found\n" || rest == "400 Bad Request\n") {
+            rest = readSock(sock);
+
+            cerr << rest << endl;
+            return;
+        }
+        cout << localPath;
+        file = fopen(localPath.c_str(), "wb");
+        if (file == NULL ) errMsg(42, "ERROR could not open the path."); //todo error handling to the client
+
+        //cout << rest << endl;
+        //cout << buff << endl;
+        rest = readSock(sock);
+        string tmp = "";
+        string sizes = "";
+        int cout = 0;
+        for (string::size_type i = 0; i < rest.length(); i++)
+        {
+            if ( rest[i] == ':')
+                cout++;
+            else if (cout == 5)
+            {
+                if (isdigit(rest[i]))
+                    sizes += rest[i];
+            }
+            //cout << tmp << endl;
+        }
+       // std::cout << sizes.c_str() << endl;
+        //todo does file exists?
+        while (atoi(sizes.c_str()) != size)
+        {
+            bzero(buf, 1024);
+            int rec = (int) recv(sock, buf, 1024, 0);
+            if (rec < 0) errMsg(42, "ERROR nic neprijato nebo disconnect.");
+
+            if (fwrite(buf, (size_t )rec, 1, file) != 1) errMsg(42, "ERROR nelze zapsat do souboru.");
+            size += rec;
+
+        }
+
+        if ( atoi(sizes.c_str()) != size) errMsg(42, "ERROR wrong file");
+
+
+    }
+    else if ( type == LST)
+    {
+        rest = createHeader(type, path);
+
+        n = (int) write(sock, rest.data(), 1024);
+        if (n < 0) errMsg(42, "ERROR cteni ze socketu");
+
+        rest = readSock(sock);
+
+        if (rest == "200 OK\n") {
+            rest = readSock(sock);
+            rest = readSock(sock);
+            cout << rest;
+        }
+        else {
+            rest = readSock(sock);
+
+            cerr << rest << endl;
+            return;
+        }
+    }
 
 }
 
 void del(int sock, string path, int type)
 {
+    string rest;
+    time_t now;
+    tm tm;
+    int n;
+    char buf[1024];
+
+    rest = createHeader(type, path);
+   // cout << rest << endl;
+    bzero(buf, 1024);
+    n = (int) write(sock, rest.c_str(), 1024);
+    if (n < 0) errMsg(42, "ERROR chyba pri psani do socketu");
+    bzero(buf,1024);
+    n = (int) read(sock, buf, 1024);
+    if (n < 0) errMsg(42, "ERROR chyba pri cteni ze socketu");
+    rest = buf;
+    bzero(buf,1024);
+    if (rest == "400 Bad Request\n")
+    {
+        n = (int) read(sock, buf, 1024);
+        if (n < 0) errMsg(42, "ERROR chyba pri cteni ze socketu");
+        cerr << buf << endl;
+    }
+    else
+    {
+        n = (int) read(sock, buf, 1024);
+        if (n < 0) errMsg(42, "ERROR chyba pri cteni ze socketu");
+    }
+
 
 }
 
@@ -330,7 +529,7 @@ int main(int argc , char *argv[])
 
                 break;
             case LST:
-                get(sockfd, str->remotePath, LST , NULL);
+                get(sockfd, str->remotePath, LST , str->localPath);
                 break;
             case MKD:
                 put(sockfd, str->remotePath, MKD, str->localPath);
@@ -346,9 +545,11 @@ int main(int argc , char *argv[])
     else
     {
         delete str;
+        close(sockfd);
         cerr << "Neznámý parametr" << endl;
         exit(1);
     }
+    close(sockfd);
     delete str;
     return 0;
 }
