@@ -25,10 +25,13 @@
 #define MKD 5
 #define RMD 6
 
+#define OK 0
 #define ERR 1
-// localhost    (?<=\/)([a-zA-Z0-9\.]*)(?=:)
-// port         (?<=:)[0-9]*
-// path         (?<=[0-9])\/.*
+
+#define FI 0
+#define FO 1
+#define NOTH 2
+
 using namespace std;
 
 string arr[] = { "PUT", "DEL", "GET", "LST", "MKD", "RMD"};
@@ -42,10 +45,12 @@ struct arg {
     string remotePath;
     int alpha, j;
 };
-//regex localhost ("(?<=\\/)([a-zA-Z0-9\\.]*)(?=:)");
-//regex port  ("(?<=:)[0-9]*");
-//regex path ("(?<=[0-9])\\/.*");
-//0 == folder , 1 == file, ERR == 2
+
+void errMsg(const char *msg)
+{
+    perror(msg);
+}
+
 int fileOrFolder(string path)
 {
     struct stat s;
@@ -54,32 +59,28 @@ int fileOrFolder(string path)
     {
         if( s.st_mode & S_IFDIR )
         {
-            return 0;
+            return FO;
             //typeOfMsg = "?type=folder HTTP/1.1";
             // cout << localPath + "dir" << endl;
         }
         else if( s.st_mode & S_IFREG )
         {
-            return 1;
+            return FI;
         } else
-            return 2;
+            return NOTH;
 
     } else
-        return 2;
+        return NOTH;
 }
-void errMsg(int err,const char *msg)
-{
-    perror(msg);
-    exit(err);
-}
-
 arg* getParams(int argc, char *argv[])
 {
     char temp[PATH_MAX];
     arg * str = new arg;
     if (argc != 4 && argc != 3)
-        errMsg(42, "ERROR: spatne argumetny");
-
+    {
+        errMsg("ERROR: spatne argumetny");
+        exit(ERR);
+    }
 
     locale l;
     string arg(argv[1]);
@@ -88,15 +89,17 @@ arg* getParams(int argc, char *argv[])
     str->j = 0;
 
     for (string::size_type i = 0; i < arg.length(); i++ )
-    {
         arg[i] = toupper(arg[i], l);
-    }
-
 
     while (str->j < 6 && str->alpha != 0) {
-        //cout << arg << endl ;
         str->alpha = arg.compare(commands[str->j]);
         str->j++;
+    }
+    if (arg == "PUT" && argc != 4)
+    {
+        delete str;
+        errMsg("ERROR: Put musi obsahovat localpath");
+        exit(ERR);
     }
 
     str->localPath = getcwd(temp, PATH_MAX);
@@ -110,8 +113,6 @@ arg* getParams(int argc, char *argv[])
         }
         else str->localPath = temporary;
     }
-
-
     string tmp;
     string argv2(argv[2]);
 
@@ -126,8 +127,6 @@ arg* getParams(int argc, char *argv[])
                 tmp =   "";
                 tmp += ":";
             }
-            //cout << tmp << end
-            // l;
         }
         else if (tmp.compare("http://") == 0 )
         {
@@ -150,17 +149,31 @@ arg* getParams(int argc, char *argv[])
         }
         else
             tmp += argv[2][i];
-        //cout << tmp << endl;
     }
-    //cout << str->ipAddr <<endl;
-    //cout << str->portNum << endl;
-    //cout << str->remotePath << endl;
+
     if (str->portNum.empty())
         str->portNum = "6677";
     if (str->ipAddr.empty() || str->portNum.empty() || str->remotePath.empty() )
-        errMsg(ERR, "Spatne zadane parametry");
+    {
+        delete str;
+        errMsg("Spatne zadane parametry");
+        exit(ERR);
+    }
 
     return str;
+}
+
+string getFirstLineOfResponse(string rest)
+{
+    string ret;
+    string::size_type i = 0;
+    while(rest[i] != '\r')
+    {
+        ret += rest[i];
+        i++;
+    }
+
+    return ret;
 }
 string createHeader(int type, string path)
 {
@@ -175,9 +188,9 @@ string createHeader(int type, string path)
             rest = "DELETE ";
             rest.append(path);
             rest += "?type=file HTTP/1.1";
-            rest += "\r\nDate: ";
+            rest += "\n\rDate: ";
             rest.append(buf);
-            rest += "\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n";
+            rest += "\n\rAccept: text/plain\n\rAccept-Encoding: identity\n\rContent-Type: text/plain\n\rContent-Length: 0\n\r";
 
             break;
 
@@ -185,28 +198,46 @@ string createHeader(int type, string path)
             rest = "DELETE ";
             rest.append(path);
             rest += "?type=folder HTTP/1.1";
-            rest += "\r\nDate: ";
+            rest += "\n\rDate: ";
             rest.append(buf);
-            rest += "\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n";
+            rest += "\n\rAccept: text/plain\n\rAccept-Encoding: identity\n\rContent-Type: text/plain\n\rContent-Length: 0\n\r";
 
             break;
         case GET:
             rest = "GET ";
             rest.append(path);
             rest += "?type=file HTTP/1.1";
-            rest += "\r\nDate: ";
+            rest += "\n\rDate: ";
             rest.append(buf);
-            rest += "\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n";
+            rest += "\n\rAccept: application/octet-stream\n\rAccept-Encoding: identity\n\rContent-Type: text/plain\n\rContent-Length: 0\n\r";
             break;
         case LST:
             rest = "GET ";
             rest.append(path);
             rest += "?type=folder HTTP/1.1";
 
-            rest += "\r\nDate: ";
+            rest += "\n\rDate: ";
             rest.append(buf);
-            rest += "\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n";
+            rest += "\n\rAccept: text/plain\n\rAccept-Encoding: identity\n\rContent-Type: text/plain\n\rContent-Length: 0\n\r";
 
+
+            break;
+        case PUT:
+            rest = "PUT ";
+            rest.append(path);
+            rest += "?type=file HTTP/1.1";
+            rest += "\n\rDate: ";
+            rest.append(buf);
+            rest += "\n\rAccept: text/plain\n\rAccept-Encoding: identity\n\rContent-Type: ";
+            break;
+
+        case MKD:
+            rest = "PUT ";
+            rest.append(path);
+            rest += "?type=folder HTTP/1.1";
+            rest += "\n\rDate: ";
+            rest.append(buf);
+            rest += "\n\rAccept: text/plain\n\rAccept-Encoding: identity\n\rContent-Type: text/plain\n\rContent-Length: 0\n\r";
 
             break;
     }
@@ -215,157 +246,151 @@ string createHeader(int type, string path)
 }
 
 string readSock(int socket){
+
     char buf[1024];
     bzero(buf, 1024);
     int n;
     string rest;
     n = (int) read(socket, buf, 1024);
-    if (n < 0) errMsg(42, "ERROR cteni ze socketu");
+
     rest = buf;
+    if (rest == "Unknown error\n")
+    {
+        cerr << "Unknown error has occured on the server side" <<endl;
+    }
     return rest;
 }
 
-void put (int sock, string path, int type, string localPath)
+int writeSock(int socket, string buf)
 {
-    FILE *file, *mime;
+    int n = (int) write(socket, buf.c_str(), 1024);
+    if (n < 0) return ERR;
+    return OK;
+}
+
+string getMIME(string localPath)
+{
+    FILE *mime;
+    char b[200];
+    string mi;
+    string a = "file -b --mime-type " + localPath;
+    if ((mime = popen(a.c_str(), "r")) == NULL)
+    {
+        errMsg("ERROR: popen neziskal mime, typ bude: application/octet-stream");
+        pclose(mime);
+
+        mi = "application/octet-stream";
+        return mi;
+    }
+    while(fgets(b, 200, mime))
+        mi += b;
+    pclose(mime);
+    return mi;
+}
+
+int put (int sock, string path, int type, string localPath)
+{
+    FILE *file;
     int n;
     long fsize;
-    struct stat s;
     char buf[1024];
     char *content = NULL;
     string rest;
     string typeOfMsg;
-    time_t now;
-    struct tm tm;
     long save;
-    if( stat(localPath.c_str(),&s) == 0 )
-    {
-        if( s.st_mode & S_IFDIR )
-        {
-            typeOfMsg = "?type=folder HTTP/1.1";
-            // cout << localPath + "dir" << endl;
-        }
-        else if( s.st_mode & S_IFREG )
-        {
-            file = fopen(localPath.c_str(), "rb");
-            typeOfMsg = "?type=file HTTP/1.1";
-            if ( file == NULL ) errMsg(42, "ERROR otevirani souboru");
-            //cout << localPath + "file" << endl;
-        }
-        else
-        {
-            errMsg(42, "ERROR ani slozka, ani soubor. ");
-        }
-    }
-    else
-    {
-        errMsg(42, "ERROR nenalezena cesta");
-    }
-    if (type == PUT)
-        rest = "PUT ";
-    else if (type == MKD)
-        rest = "MKD ";
-
-    rest.append(path);
-    rest.append(typeOfMsg);
-
-    now = time(0);
-    tm = *gmtime(&now);
-    strftime(buf, sizeof buf, "%a, %d %b %Y %H:%M:%S %Z", &tm);
-
-    rest += "\r\nDate: ";
-    rest.append(buf);
-    //todo content type in case of folder - txt?
-    rest += "\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nContent-Type: application/octet-stream\r\nContent-Length: ";
+    rest = createHeader(type, path);
 
     if (type == PUT) {
-        if (fileOrFolder(localPath) != 1)
-            errMsg(42, "ERROR nelze otevrit nic jineho nez soubor");
+        if (fileOrFolder(localPath) != FI)
+        {
+            errMsg("ERROR: nelze otevrit nic jineho nez soubor");
+            return ERR;
+        }
+
         file = fopen(localPath.c_str(), "rb");
-
-        if (!file) errMsg(42, "ERROR pri otevirani souboru");
-
-        if (fseek(file, 0, SEEK_END) == -1) errMsg(42, "ERROR nelze dojit na konec souboru");
-
+        if (!file) {
+            errMsg("ERROR: pri otevirani souboru");
+            return ERR;
+        }
+        if (fseek(file, 0, SEEK_END) == -1) {
+            errMsg("ERROR: nelze dojit na konec souboru");
+            return ERR;
+        }
         fsize = ftell(file);
-        //  cout << fsize << endl;
-        if (fsize == -1) errMsg(42, "ERROR zadna velikost souboru");
+        if (fsize == -1) {
+            errMsg("ERROR: zadna velikost souboru");
+            return ERR;
+        }
 
         stringstream ss;
         ss << fsize;
         string str = ss.str();
+        rest += getMIME(localPath);
+        rest += "\rContent-Length: ";
         rest += str + "\n\r";
-        save = fsize;
         rewind(file);
-        string a = "file -b --mime-type " + localPath;
-        if ((mime = popen(a.c_str(), "r")) == NULL)
-            errMsg(42, "ERROR popen neziskal mime");
 
-        char b[200];
-        string mi;
-        while(fgets(b, 200, mime))
-            mi += b;
-        cout << mi << endl;
-        pclose(mime);
         content = (char *) malloc((size_t) fsize);
-        if (!content) errMsg(42, "ERROR nenaalokoval se prostor pro file");
+        if (!content) {
+            errMsg("ERROR: nenaalokoval se prostor pro file");
+            return ERR;
+        }
 
-        if (fread(content, fsize, 1, file) != 1) errMsg(42, "ERROR soubor nebyl nacten");
+        if (fread(content, fsize, 1, file) != 1)
+        {
+            errMsg("ERROR: soubor nebyl nacten");
+            free(content);
+            fclose(file);
+            return ERR;
+        }
         fclose(file);
 
-        //cout<< fsize <<endl;
-        n = (int) write(sock, rest.data(), 1024);
-        if (n < 0) errMsg(42, "ERROR cteni ze socketu");
+       writeSock(sock, rest);
 
-        rest = readSock(sock);
-        if (rest != "200 OK\n") errMsg(42, "ERROR neco se pokazilo u respondu.");
-
-        //todo read http head
         while (fsize > 0) {
             int sent = (int) send(sock, content, fsize, 0);
             if (sent <= 0) {
-                if (sent == 0) errMsg(42, "ERROR disconnected");
-                else errMsg(42, "ERROR nic nebylo zapsano");
+                if (sent == 0) {
+                    errMsg("ERROR: disconnected");
+                    //free(content-save);
+                    return ERR;
+                }
+                else
+                {
+                    errMsg("ERROR: nic nebylo zapsano");
+                    //free(content-save);
+                    return ERR;
+                }
             }
             content += sent;
             fsize -= sent;
+            save +=sent;
         }
 
-        free(content-save);
-        cout << buf << endl;
+        //free(content-save);
+        rest = getFirstLineOfResponse(readSock(sock));
+
+        if (rest != "HTTP/1.1 200 OK\n")
+            cerr << readSock(sock);
     }
     else if (type == MKD)
     {
-        bzero(buf, 1024);
-        rest += "0 \n\r";
-        n = (int) write(sock, rest.data(), 1024);
-        if (n < 0) errMsg(42, "ERROR cteni ze socketu");
+        writeSock(sock, rest) != OK;
 
-        rest = readSock(sock);
-        if (rest != "200 OK\n")
-        {
-            if(strcmp(buf, "Already exists.") == 0)
-            {
-                cerr<<buf<<endl;
-            }
-            else
-                errMsg(42, "ERROR neco se pokazilo u respondu.");
-        }
-        //cout << buf << endl;
+        rest = getFirstLineOfResponse(readSock(sock));
 
+        if (rest != "HTTP/1.1 200 OK\n")
+            cerr << readSock(sock);
     }
-
 }
-
-
-void get(int sock, string path, int type, string localPath)
+int get(int sock, string path, int type, string localPath)
 {
     char buf[1024];
     int size = 0;
     int n;
     FILE *file;
-    string rest;
-   // cout << path << endl;
+    string rest, errorControl;
+
     if (type == GET)
     {
         size_t f = path.find_last_of("/");
@@ -373,26 +398,25 @@ void get(int sock, string path, int type, string localPath)
 
         rest = createHeader(type, path);
 
-
-        n = (int) write(sock, rest.data(), 1024);
-        if (n < 0) errMsg(42, "ERROR cteni ze socketu");
+        writeSock(sock,rest);
 
         rest = readSock(sock);
-        if (rest == "404 Not Found\n" || rest == "400 Bad Request\n") {
-            rest = readSock(sock);
-
-            cerr << rest << endl;
-            return;
+        errorControl = getFirstLineOfResponse(rest);
+        if (errorControl == "HTTP/1.1 404 Not Found" || errorControl == "HTTP/1.1 400 Bad Request") {
+            cerr << readSock(sock) ;
+            return ERR;
         }
-        cout << localPath;
-        file = fopen(localPath.c_str(), "wb");
-        if (file == NULL ) errMsg(42, "ERROR could not open the path."); //todo error handling to the client
 
-        //cout << rest << endl;
-        //cout << buff << endl;
-        rest = readSock(sock);
+        file = fopen(localPath.c_str(), "wb");
+        if (file == NULL )
+        {
+            errMsg("ERROR: could not open the path.");
+            return ERR;
+        } //todo error handling to the client
+
         string tmp = "";
         string sizes = "";
+
         int cout = 0;
         for (string::size_type i = 0; i < rest.length(); i++)
         {
@@ -403,36 +427,53 @@ void get(int sock, string path, int type, string localPath)
                 if (isdigit(rest[i]))
                     sizes += rest[i];
             }
-            //cout << tmp << endl;
         }
-       // std::cout << sizes.c_str() << endl;
         //todo does file exists?
+
         while (atoi(sizes.c_str()) != size)
         {
             bzero(buf, 1024);
             int rec = (int) recv(sock, buf, 1024, 0);
-            if (rec < 0) errMsg(42, "ERROR nic neprijato nebo disconnect.");
+            if (rec < 0)
+            {
+                errMsg("ERROR: nic neprijato nebo disconnect.");
+                remove(localPath.c_str());
+                fclose(file);
+                return ERR;
+            }
 
-            if (fwrite(buf, (size_t )rec, 1, file) != 1) errMsg(42, "ERROR nelze zapsat do souboru.");
+            if (fwrite(buf, (size_t )rec, 1, file) != 1)
+            {
+                errMsg("ERROR: nelze zapsat do souboru.");
+                remove(localPath.c_str());
+                fclose(file);
+                return ERR;
+            }
             size += rec;
+        }
+
+        if ( atoi(sizes.c_str()) != size)
+        {
+            errMsg("ERROR: pokazeny soubor");
+            remove(localPath.c_str());
+            fclose(file);
+            return ERR;
 
         }
 
-        if ( atoi(sizes.c_str()) != size) errMsg(42, "ERROR wrong file");
-
+        fclose(file);
 
     }
     else if ( type == LST)
     {
         rest = createHeader(type, path);
 
-        n = (int) write(sock, rest.data(), 1024);
-        if (n < 0) errMsg(42, "ERROR cteni ze socketu");
+        writeSock(sock, rest);
+
 
         rest = readSock(sock);
-
-        if (rest == "200 OK\n") {
-            rest = readSock(sock);
+        errorControl = getFirstLineOfResponse(rest);
+        if (errorControl == "HTTP/1.1 200 OK\n") {
             rest = readSock(sock);
             cout << rest;
         }
@@ -440,53 +481,38 @@ void get(int sock, string path, int type, string localPath)
             rest = readSock(sock);
 
             cerr << rest << endl;
-            return;
+            return ERR;
         }
     }
+    return OK;
 
 }
 
-void del(int sock, string path, int type)
+int del(int sock, string path, int type)
 {
     string rest;
-    time_t now;
-    tm tm;
-    int n;
     char buf[1024];
 
     rest = createHeader(type, path);
-   // cout << rest << endl;
+    // cout << rest << endl;
     bzero(buf, 1024);
-    n = (int) write(sock, rest.c_str(), 1024);
-    if (n < 0) errMsg(42, "ERROR chyba pri psani do socketu");
-    bzero(buf,1024);
-    n = (int) read(sock, buf, 1024);
-    if (n < 0) errMsg(42, "ERROR chyba pri cteni ze socketu");
-    rest = buf;
-    bzero(buf,1024);
-    if (rest == "400 Bad Request\n")
-    {
-        n = (int) read(sock, buf, 1024);
-        if (n < 0) errMsg(42, "ERROR chyba pri cteni ze socketu");
-        cerr << buf << endl;
-    }
-    else
-    {
-        n = (int) read(sock, buf, 1024);
-        if (n < 0) errMsg(42, "ERROR chyba pri cteni ze socketu");
-    }
 
+    writeSock(sock, rest);
 
+    rest = getFirstLineOfResponse(readSock(sock));
+
+    if (rest != "HTTP/1.1 200 OK\n")
+    {
+        cerr << readSock(sock);
+        return ERR;
+    }
 }
-
-
-
 int main(int argc , char *argv[])
 {
 
     arg *str = getParams(argc, argv);
 
-
+   // cout << str->ipAddr;
     int sockfd, portno, n;
     sockaddr_in serv_addr;
     hostent *server = NULL;
@@ -495,48 +521,55 @@ int main(int argc , char *argv[])
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
     if (sockfd < 0)
-        errMsg(ERR, "Nevytvořil se socket");
+    {
+        errMsg( "Nevytvořil se socket");
+        delete str;
+        return ERR;
+    }
 
     server = gethostbyname(str->ipAddr.c_str());
 
     if (server == NULL)
-        errMsg(ERR, "Nevytvořil hosta");
+    {
+        errMsg("Nevytvořil hosta");
+        delete str;
+        return ERR;
+    }
 
     bzero((char *) &serv_addr, sizeof(serv_addr));
     serv_addr.sin_family    =   AF_INET;
     bcopy((char *) server->h_addr, (char*)&serv_addr.sin_addr.s_addr, server->h_length);
 
     serv_addr.sin_port  =   htons(portno);
-
-    if (connect(sockfd, (sockaddr *) &serv_addr, sizeof(serv_addr)) < 0)
-        errMsg(ERR, "ERROR connectiong");
+    n = (int) connect(sockfd, (sockaddr *) &serv_addr, sizeof(serv_addr));
+    if (n < 0)
+    {
+        errMsg("ERROR: connecting");
+        delete str;
+        return ERR;
+    }
 
     if (str->alpha == 0)
     {   // cout << commands[PUT-1].c_str() << endl;
         switch (str->j)
         {
             case PUT:
-
-                put(sockfd, str->remotePath, PUT, str->localPath);
-
+                n = put(sockfd, str->remotePath, PUT, str->localPath);
                 break;
             case DEL:
-
-                del(sockfd, str->remotePath, DEL);
+                n = del(sockfd, str->remotePath, DEL);
                 break;
             case GET:
-                get(sockfd, str->remotePath, GET , str->localPath);
-
+                n = get(sockfd, str->remotePath, GET , str->localPath);
                 break;
             case LST:
-                get(sockfd, str->remotePath, LST , str->localPath);
+                n = get(sockfd, str->remotePath, LST , str->localPath);
                 break;
             case MKD:
-                put(sockfd, str->remotePath, MKD, str->localPath);
-
+                n = put(sockfd, str->remotePath, MKD, str->localPath);
                 break;
             case RMD:
-                del(sockfd, str->remotePath, RMD);
+                n = del(sockfd, str->remotePath, RMD);
                 break;
             default:
                 cerr << "Hello Chuck! I've been waiting for you" << endl;
@@ -546,10 +579,16 @@ int main(int argc , char *argv[])
     {
         delete str;
         close(sockfd);
-        cerr << "Neznámý parametr" << endl;
-        exit(1);
+        errMsg("ERROR: Neznamy parametr");
+        return ERR;
     }
     close(sockfd);
     delete str;
-    return 0;
+
+    if (n == OK)
+        return 0;
+    else
+    {
+        return ERR;
+    }
 }
