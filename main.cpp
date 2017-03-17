@@ -97,6 +97,7 @@ arg* getParams(int argc, char *argv[])
     }
     if (arg == "PUT" && argc != 4)
     {
+        cout << argc << endl;
         delete str;
         errMsg("ERROR: Put musi obsahovat localpath");
         exit(ERR);
@@ -172,8 +173,22 @@ string getFirstLineOfResponse(string rest)
         ret += rest[i];
         i++;
     }
+    ret += "\n";
 
     return ret;
+}
+
+string getHeader(string rest)
+{
+    string control = getFirstLineOfResponse(rest);
+
+    string::size_type i = 3;
+
+    while(!(rest[i-3] == '\r' && rest[i-2] == '\n' && rest[i-1] == '\r' && rest[i] == '\n'))
+        i++;
+    rest.erase(0, i+1);
+
+    return rest;
 }
 string createHeader(int type, string path)
 {
@@ -188,9 +203,9 @@ string createHeader(int type, string path)
             rest = "DELETE ";
             rest.append(path);
             rest += "?type=file HTTP/1.1";
-            rest += "\n\rDate: ";
+            rest += "\r\nDate: ";
             rest.append(buf);
-            rest += "\n\rAccept: text/plain\n\rAccept-Encoding: identity\n\rContent-Type: text/plain\n\rContent-Length: 0\n\r";
+            rest += "\r\nAccept: text/plain\r\nAccept-Encoding: identity\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n";
 
             break;
 
@@ -198,27 +213,27 @@ string createHeader(int type, string path)
             rest = "DELETE ";
             rest.append(path);
             rest += "?type=folder HTTP/1.1";
-            rest += "\n\rDate: ";
+            rest += "\r\nDate: ";
             rest.append(buf);
-            rest += "\n\rAccept: text/plain\n\rAccept-Encoding: identity\n\rContent-Type: text/plain\n\rContent-Length: 0\n\r";
+            rest += "\r\nAccept: text/plain\r\nAccept-Encoding: identity\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n";
 
             break;
         case GET:
             rest = "GET ";
             rest.append(path);
             rest += "?type=file HTTP/1.1";
-            rest += "\n\rDate: ";
+            rest += "\r\nDate: ";
             rest.append(buf);
-            rest += "\n\rAccept: application/octet-stream\n\rAccept-Encoding: identity\n\rContent-Type: text/plain\n\rContent-Length: 0\n\r";
+            rest += "\r\nAccept: application/octet-stream\r\nAccept-Encoding: identity\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n";
             break;
         case LST:
             rest = "GET ";
             rest.append(path);
             rest += "?type=folder HTTP/1.1";
 
-            rest += "\n\rDate: ";
+            rest += "\r\nDate: ";
             rest.append(buf);
-            rest += "\n\rAccept: text/plain\n\rAccept-Encoding: identity\n\rContent-Type: text/plain\n\rContent-Length: 0\n\r";
+            rest += "\r\nAccept: text/plain\r\nAccept-Encoding: identity\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n";
 
 
             break;
@@ -226,18 +241,18 @@ string createHeader(int type, string path)
             rest = "PUT ";
             rest.append(path);
             rest += "?type=file HTTP/1.1";
-            rest += "\n\rDate: ";
+            rest += "\r\nDate: ";
             rest.append(buf);
-            rest += "\n\rAccept: text/plain\n\rAccept-Encoding: identity\n\rContent-Type: ";
+            rest += "\r\nAccept: text/plain\r\nAccept-Encoding: identity\r\nContent-Type: ";
             break;
 
         case MKD:
             rest = "PUT ";
             rest.append(path);
             rest += "?type=folder HTTP/1.1";
-            rest += "\n\rDate: ";
+            rest += "\r\nDate: ";
             rest.append(buf);
-            rest += "\n\rAccept: text/plain\n\rAccept-Encoding: identity\n\rContent-Type: text/plain\n\rContent-Length: 0\n\r";
+            rest += "\r\nAccept: text/plain\r\nAccept-Encoding: identity\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n";
 
             break;
     }
@@ -247,24 +262,47 @@ string createHeader(int type, string path)
 
 string readSock(int socket){
 
-    char buf[1024];
-    bzero(buf, 1024);
-    int n;
-    string rest;
-    n = (int) read(socket, buf, 1024);
-
-    rest = buf;
-    if (rest == "Unknown error\n")
-    {
-        cerr << "Unknown error has occured on the server side" <<endl;
+    char buff[1024];
+    string rcv;
+    int n = 0;
+    while(42) {
+        bzero(buff, 1024);
+        n = recv(socket, buff, 1024,0);
+        if (n > 0) {
+            rcv += string(buff,n);
+        }
+        else if (n == 0) {
+            break;
+        } else {
+            fprintf(stderr, "UNKNOWN ERROR\n");
+            exit(ERR);
+        }
     }
-    return rest;
+    return rcv;
 }
 
 int writeSock(int socket, string buf)
 {
-    int n = (int) write(socket, buf.c_str(), 1024);
-    if (n < 0) return ERR;
+    long size = buf.size();
+
+    while (size > 0)
+    {
+        int n = (int) send(socket, (void*)buf.data(), buf.size(),0);
+        shutdown(socket, SHUT_WR);
+        if (n <= 0) {
+            if (n == 0) {
+                errMsg("ERROR: disconnected");
+                return ERR;
+            }
+            else
+            {
+                errMsg("ERROR: nic nebylo zapsano");
+                return ERR;
+            }
+        }
+        size -= n;
+    }
+
     return OK;
 }
 
@@ -288,19 +326,26 @@ string getMIME(string localPath)
     return mi;
 }
 
+
+
 int put (int sock, string path, int type, string localPath)
 {
     FILE *file;
     int n;
+    int k;
     long fsize;
     char buf[1024];
     char *content = NULL;
     string rest;
+    int err;
     string typeOfMsg;
     long save;
-    rest = createHeader(type, path);
+
 
     if (type == PUT) {
+
+
+        rest = createHeader(type, path);
         if (fileOrFolder(localPath) != FI)
         {
             errMsg("ERROR: nelze otevrit nic jineho nez soubor");
@@ -322,15 +367,15 @@ int put (int sock, string path, int type, string localPath)
             return ERR;
         }
 
+
         stringstream ss;
         ss << fsize;
         string str = ss.str();
         rest += getMIME(localPath);
-        rest += "\rContent-Length: ";
-        rest += str + "\n\r";
+
         rewind(file);
 
-        content = (char *) malloc((size_t) fsize);
+        content = (char *) malloc(fsize);
         if (!content) {
             errMsg("ERROR: nenaalokoval se prostor pro file");
             return ERR;
@@ -344,52 +389,46 @@ int put (int sock, string path, int type, string localPath)
             return ERR;
         }
         fclose(file);
+        rest += "\rContent-Length: ";
+        rest += str + "\r\n\r\n";
+        rest += string(content,fsize);
+        free(content);
 
-       writeSock(sock, rest);
+        writeSock(sock, rest);
 
-        while (fsize > 0) {
-            int sent = (int) send(sock, content, fsize, 0);
-            if (sent <= 0) {
-                if (sent == 0) {
-                    errMsg("ERROR: disconnected");
-                    //free(content-save);
-                    return ERR;
-                }
-                else
-                {
-                    errMsg("ERROR: nic nebylo zapsano");
-                    //free(content-save);
-                    return ERR;
-                }
-            }
-            content += sent;
-            fsize -= sent;
-            save +=sent;
+        rest = readSock(sock);
+
+        if (getFirstLineOfResponse(rest) != "HTTP/1.1 200 OK\n")
+        {
+            cerr << getHeader(rest);
+            return ERR;
         }
 
-        //free(content-save);
-        rest = getFirstLineOfResponse(readSock(sock));
 
-        if (rest != "HTTP/1.1 200 OK\n")
-            cerr << readSock(sock);
+
+        //if (rest != "HTTP/1.1 200 OK\n")
+          //  cerr << readSock(sock);
     }
     else if (type == MKD)
     {
-        writeSock(sock, rest) != OK;
+        rest = createHeader(type, path);
+        writeSock(sock, rest);
+        rest = readSock(sock);
 
-        rest = getFirstLineOfResponse(readSock(sock));
-
-        if (rest != "HTTP/1.1 200 OK\n")
-            cerr << readSock(sock);
+        if (getFirstLineOfResponse(rest) != "HTTP/1.1 200 OK\n")
+        {
+            cerr << getHeader(rest);
+            return ERR;
+        }
     }
+
+    return OK;
 }
 int get(int sock, string path, int type, string localPath)
 {
-    char buf[1024];
-    int size = 0;
-    int n;
+    string err;
     FILE *file;
-    string rest, errorControl;
+    string rest;
 
     if (type == GET)
     {
@@ -401,65 +440,25 @@ int get(int sock, string path, int type, string localPath)
         writeSock(sock,rest);
 
         rest = readSock(sock);
-        errorControl = getFirstLineOfResponse(rest);
-        if (errorControl == "HTTP/1.1 404 Not Found" || errorControl == "HTTP/1.1 400 Bad Request") {
-            cerr << readSock(sock) ;
+        if (getFirstLineOfResponse(rest) != "HTTP/1.1 200 OK\n")
+        {
+            cerr << getHeader(rest);
             return ERR;
         }
 
+        rest = getHeader(rest);
+
         file = fopen(localPath.c_str(), "wb");
+
         if (file == NULL )
         {
             errMsg("ERROR: could not open the path.");
             return ERR;
         } //todo error handling to the client
 
-        string tmp = "";
-        string sizes = "";
-
-        int cout = 0;
-        for (string::size_type i = 0; i < rest.length(); i++)
-        {
-            if ( rest[i] == ':')
-                cout++;
-            else if (cout == 5)
-            {
-                if (isdigit(rest[i]))
-                    sizes += rest[i];
-            }
-        }
+        fwrite(rest.c_str(),1,rest.size(), file);
         //todo does file exists?
 
-        while (atoi(sizes.c_str()) != size)
-        {
-            bzero(buf, 1024);
-            int rec = (int) recv(sock, buf, 1024, 0);
-            if (rec < 0)
-            {
-                errMsg("ERROR: nic neprijato nebo disconnect.");
-                remove(localPath.c_str());
-                fclose(file);
-                return ERR;
-            }
-
-            if (fwrite(buf, (size_t )rec, 1, file) != 1)
-            {
-                errMsg("ERROR: nelze zapsat do souboru.");
-                remove(localPath.c_str());
-                fclose(file);
-                return ERR;
-            }
-            size += rec;
-        }
-
-        if ( atoi(sizes.c_str()) != size)
-        {
-            errMsg("ERROR: pokazeny soubor");
-            remove(localPath.c_str());
-            fclose(file);
-            return ERR;
-
-        }
 
         fclose(file);
 
@@ -472,15 +471,12 @@ int get(int sock, string path, int type, string localPath)
 
 
         rest = readSock(sock);
-        errorControl = getFirstLineOfResponse(rest);
-        if (errorControl == "HTTP/1.1 200 OK\n") {
-            rest = readSock(sock);
-            cout << rest;
+        err = getFirstLineOfResponse(rest);
+        if (err == "HTTP/1.1 200 OK\n") {
+            cout << getHeader(rest);
         }
         else {
-            rest = readSock(sock);
-
-            cerr << rest << endl;
+            cerr << getHeader(rest);
             return ERR;
         }
     }
@@ -490,22 +486,20 @@ int get(int sock, string path, int type, string localPath)
 
 int del(int sock, string path, int type)
 {
-    string rest;
-    char buf[1024];
-
+    string rest,err;
     rest = createHeader(type, path);
-    // cout << rest << endl;
-    bzero(buf, 1024);
-
+    // cout << rest << endl;;
     writeSock(sock, rest);
+    rest = readSock(sock);
+    err  = getFirstLineOfResponse(rest);
 
-    rest = getFirstLineOfResponse(readSock(sock));
-
-    if (rest != "HTTP/1.1 200 OK\n")
+    if (err != "HTTP/1.1 200 OK\n")
     {
-        cerr << readSock(sock);
+        cerr << getHeader(rest);
         return ERR;
     }
+
+    return OK;
 }
 int main(int argc , char *argv[])
 {
