@@ -105,6 +105,7 @@ arg* getParams(int argc, char *argv[])
 
     str->localPath = getcwd(temp, PATH_MAX);
     string temporary;
+
     if (argc == 4)
     {
         temporary = argv[3];
@@ -350,6 +351,7 @@ int put (int sock, string path, int type, string localPath)
 
 
         rest = createHeader(type, path);
+
         if (fileOrFolder(localPath) != FI)
         {
             errMsg("ERROR: nelze otevrit nic jineho nez soubor");
@@ -436,8 +438,8 @@ int get(int sock, string path, int type, string localPath)
 
     if (type == GET)
     {
-        size_t f = path.find_last_of("/");
-        localPath += path.substr(f);
+        //size_t f = path.find_last_of("/");
+        //localPath += path.substr(f);
 
         rest = createHeader(type, path);
 
