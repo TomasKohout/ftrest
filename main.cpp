@@ -97,7 +97,7 @@ arg* getParams(int argc, char *argv[])
     }
     if (arg == "PUT" && argc != 4)
     {
-        cout << argc << endl;
+       // cout << argc << endl;
         delete str;
         errMsg("ERROR: Put musi obsahovat localpath");
         exit(ERR);
@@ -108,11 +108,15 @@ arg* getParams(int argc, char *argv[])
     if (argc == 4)
     {
         temporary = argv[3];
-        if (temporary.find("~") == 0) {
+        string::size_type i = 0;
+        if (temporary[i] == '~') {
+           // cout << temporary << endl;
             temporary.erase(0, 1);
             str->localPath.append(temporary);
         }
         else str->localPath = temporary;
+
+        //cout << str->localPath << endl;
     }
     string tmp;
     string argv2(argv[2]);
@@ -513,6 +517,12 @@ int main(int argc , char *argv[])
 
     portno = atoi(str->portNum.c_str());
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (portno > 65535 && portno < 0)
+    {
+        errMsg( "Porty jsou v rozsahu 0 - 65535. Doporučuji používat porty nad 1024.");
+        delete str;
+        return ERR;
+    }
 
     if (sockfd < 0)
     {
